@@ -68,39 +68,52 @@ function wqo_render_settings_page() {
 
 
 // 3. The Core Optimizer Engine
+// 3. The Core Optimizer Engine
 add_action( 'plugins_loaded', 'wqo_preload_targeted_options', 1 );
 
 function wqo_preload_targeted_options() {
     global $wpdb;
 
-    // 1. Get our saved text list of options
     $raw_text = get_option( 'wqo_options_to_cache' );
     if ( empty( $raw_text ) ) {
         return;
     }
 
-    // 2. Split the text into an array, removing extra spaces and empty lines
     $options_list = array_filter( array_map( 'trim', explode( "\n", $raw_text ) ) );
     if ( empty( $options_list ) ) {
         return;
     }
 
-    // 3. Prepare the array for a secure SQL query
     $placeholders = implode( "','", esc_sql( $options_list ) );
 
-    // 4. Run ONE single query to fetch them all at once
     $results = $wpdb->get_results( "
         SELECT option_name, option_value 
         FROM {$wpdb->options} 
         WHERE option_name IN ('$placeholders')
     " );
 
-    // 5. Inject the results into WordPress memory (Object Cache)
+    $found_options = array();
+
+    // 5. Inject found results into standard Object Cache
     if ( $results ) {
         foreach ( $results as $row ) {
             $unserialized_value = maybe_unserialize( $row->option_value );
             wp_cache_add( $row->option_name, $unserialized_value, 'options' );
+            $found_options[] = $row->option_name; // Keep track of what we found
         }
+    }
+
+    // 6. Inject MISSING results into the "notoptions" cache
+    $missing_options = array_diff( $options_list, $found_options );
+    if ( ! empty( $missing_options ) ) {
+        $notoptions = wp_cache_get( 'notoptions', 'options' );
+        if ( ! is_array( $notoptions ) ) {
+            $notoptions = array();
+        }
+        foreach ( $missing_options as $missing ) {
+            $notoptions[ $missing ] = true; // Tell WP this option definitely doesn't exist
+        }
+        wp_cache_set( 'notoptions', $notoptions, 'options' );
     }
 }
 
