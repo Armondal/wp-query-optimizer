@@ -67,9 +67,8 @@ function wqo_render_settings_page() {
 
 
 
-// 3. The Core Optimizer Engine
-// 3. The Core Optimizer Engine
-add_action( 'plugins_loaded', 'wqo_preload_targeted_options', 1 );
+// 3. The Core Optimizer Engine (Runs immediately to beat other plugins)
+wqo_preload_targeted_options();
 
 function wqo_preload_targeted_options() {
     global $wpdb;
@@ -84,34 +83,60 @@ function wqo_preload_targeted_options() {
         return;
     }
 
-    $placeholders = implode( "','", esc_sql( $options_list ) );
+    $exact_matches = array();
+    $like_matches = array();
 
+    // Sort into exact matches and wildcard matches
+    foreach ( $options_list as $opt ) {
+        if ( strpos( $opt, '%' ) !== false ) {
+            $like_matches[] = esc_sql( $opt );
+        } else {
+            $exact_matches[] = $opt;
+        }
+    }
+
+    // Build the SQL WHERE clause dynamically
+    $where_clauses = array();
+    
+    if ( ! empty( $exact_matches ) ) {
+        $placeholders = implode( "','", esc_sql( $exact_matches ) );
+        $where_clauses[] = "option_name IN ('$placeholders')";
+    }
+    
+    if ( ! empty( $like_matches ) ) {
+        foreach ( $like_matches as $like_opt ) {
+            $where_clauses[] = "option_name LIKE '$like_opt'";
+        }
+    }
+
+    $where_sql = implode( ' OR ', $where_clauses );
+
+    // Run ONE single query for everything
     $results = $wpdb->get_results( "
         SELECT option_name, option_value 
         FROM {$wpdb->options} 
-        WHERE option_name IN ('$placeholders')
+        WHERE $where_sql
     " );
 
     $found_options = array();
 
-    // 5. Inject found results into standard Object Cache
     if ( $results ) {
         foreach ( $results as $row ) {
             $unserialized_value = maybe_unserialize( $row->option_value );
             wp_cache_add( $row->option_name, $unserialized_value, 'options' );
-            $found_options[] = $row->option_name; // Keep track of what we found
+            $found_options[] = $row->option_name; 
         }
     }
 
-    // 6. Inject MISSING results into the "notoptions" cache
-    $missing_options = array_diff( $options_list, $found_options );
+    // Only run the "notoptions" negative cache logic for EXACT matches, not wildcards
+    $missing_options = array_diff( $exact_matches, $found_options );
     if ( ! empty( $missing_options ) ) {
         $notoptions = wp_cache_get( 'notoptions', 'options' );
         if ( ! is_array( $notoptions ) ) {
             $notoptions = array();
         }
         foreach ( $missing_options as $missing ) {
-            $notoptions[ $missing ] = true; // Tell WP this option definitely doesn't exist
+            $notoptions[ $missing ] = true; 
         }
         wp_cache_set( 'notoptions', $notoptions, 'options' );
     }
