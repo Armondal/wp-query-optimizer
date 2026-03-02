@@ -103,3 +103,21 @@ function wqo_preload_targeted_options() {
         }
     }
 }
+
+// 4. Cache Cleaning Engine 🧹
+function wqo_clear_custom_cache() {
+    $raw_text = get_option( 'wqo_options_to_cache' );
+    if ( empty( $raw_text ) ) {
+        return;
+    }
+
+    $options_list = array_filter( array_map( 'trim', explode( "\n", $raw_text ) ) );
+    
+    // Loop through the list and delete each from WordPress memory
+    foreach ( $options_list as $option_name ) {
+        wp_cache_delete( $option_name, 'options' );
+    }
+}
+
+// Trigger 1: Automatic (Runs whenever ANY setting is updated in WordPress)
+add_action( 'updated_option', 'wqo_clear_custom_cache' );
